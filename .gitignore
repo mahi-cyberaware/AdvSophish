@@ -1,0 +1,38 @@
+# Runtime generated files
+.server/
+auth/
+.sites/
+dashboard/assets/
+*.log
+*.dat
+ip.txt
+.creds.txt
+.otp.txt
+.cld.log
+.loclx
+.localxpose/
+
+# OS junk files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor files
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.sublime-*
+
+# Compiled / packaged files
+*.deb
+*.tar.gz
+*.zip
+build_env/
+
+# Sensitive data (if any b
+ prevent accidental commit)
+config.local
+.secrets
+.env

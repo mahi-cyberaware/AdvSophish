@@ -1,0 +1,27 @@
+# AdvSophish b
+ Advanced Phishing Framework with Dashboard & Obfuscation
+
+**Author:** mahi-cyberaware  
+**Version:** 3.1.0  
+**GitHub:** https://github.com/mahi-cyberaware/AdvSophish  
+
+AdvSophish is a professional, educational phishing toolkit that demonstrates **twob
+
+## b o8 Features
+- **Twob
+- **Dashboard** b
+ web interface to view, export, and clear captured credentials/OTPs.
+- **Automatic obfuscation** b
+ every phishing URL is shortened (is.gd/tinyurl) and optionally masked.
+- **35+ sites** b
+ TikTok, Facebook, Instagram, Google, Amazon, PayPal, etc. (all from your menu).
+- **Three tunneling options** b
+ Localhost, Cloudflared, LocalXpose.
+- **Crossb
+
+## p
+### From source (Linux / Termux)
+```bash
+git clone https://github.com/mahi-cyberaware/AdvSophish.git
+cd AdvSophish
+bash AdvSophish.sh
