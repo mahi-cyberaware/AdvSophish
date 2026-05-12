@@ -4,7 +4,7 @@
   <img src="logo.jpg" alt="AdvSophish Logo" width="220">
 </p>
 
-<h1 align="center">AdvSophish</h1>
+
 
 <p align="center">
   <strong>Advanced Phishing Framework for Security Awareness & Authorised Penetration Testing</strong><br>
