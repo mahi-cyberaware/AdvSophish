@@ -1,7 +1,7 @@
 <!-- AdvSophish – Advanced Phishing Framework (Educational) -->
 
 <p align="center">
-  <img src=".github/misc/logo.png" alt="AdvSophish Logo" width="220">
+  <img src="logo.png" alt="AdvSophish Logo" width="220">
 </p>
 
 <h1 align="center">AdvSophish</h1>
